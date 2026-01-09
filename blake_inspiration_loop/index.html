@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>The Blake Inspiration Loop</title>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: #0b1220;
+      color: #e8eefc;
+      display: grid;
+      place-items: center;
+      min-height: 100vh;
+    }
+    .card {
+      width: min(720px, 92vw);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px;
+      padding: 22px 18px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+    }
+    .top {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .face {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    img {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .title {
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      font-size: 16px;
+      margin: 0;
+    }
+    .subtitle {
+      margin: 4px 0 0 0;
+      opacity: 0.78;
+      font-size: 13px;
+      line-height: 1.25;
+    }
+    .hud {
+      display: grid;
+      gap: 8px;
+      min-width: 260px;
+    }
+    .barwrap {
+      display: grid;
+      gap: 6px;
+    }
+    .barline {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      opacity: 0.85;
+    }
+    .bar {
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      overflow: hidden;
+    }
+    .fill {
+      height: 100%;
+      width: 0%;
+      background: rgba(232,238,252,0.85);
+      transition: width 250ms ease;
+    }
+
+    .body {
+      margin-top: 8px;
+    }
+    .prompt {
+      font-size: 18px;
+      line-height: 1.35;
+      margin: 8px 0 12px 0;
+    }
+    .note {
+      margin: 0 0 14px 0;
+      font-size: 13px;
+      opacity: 0.78;
+      line-height: 1.35;
+    }
+    .choices {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+    }
+    button {
+      padding: 10px 14px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.14);
+      background: rgba(255,255,255,0.06);
+      color: #e8eefc;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 120ms ease, background 120ms ease, border 120ms ease;
+    }
+    button:hover {
+      transform: translateY(-1px);
+      background: rgba(255,255,255,0.09);
+      border: 1px solid rgba(255,255,255,0.2);
+    }
+    .footer {
+      margin-top: 16px;
+      font-size: 12px;
+      opacity: 0.65;
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .pill {
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.05);
+    }
+    .glitch {
+      animation: glitch 400ms steps(2, end) 1;
+    }
+    @keyframes glitch {
+      0% { transform: translateX(0); }
+      25% { transform: translateX(-2px); }
+      50% { transform: translateX(3px); }
+      75% { transform: translateX(-1px); }
+      100% { transform: translateX(0); }
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="top">
+      <div class="face">
+        <img src="./static/blake.png" alt="Blake" />
+        <div>
+          <p class="title">The Blake Inspiration Loop</p>
+          <p class="subtitle">Belize, kids, work, and one inevitable conclusion</p>
+        </div>
+      </div>
+
+      <div class="hud">
+        <div class="barwrap">
+          <div class="barline"><span>Time remaining</span><span id="timeText">2:00</span></div>
+          <div class="bar"><div class="fill" id="timeFill"></div></div>
+        </div>
+        <div class="barwrap">
+          <div class="barline"><span>Energy</span><span id="energyText">70</span></div>
+          <div class="bar"><div class="fill" id="energyFill"></div></div>
+        </div>
+        <div class="barwrap">
+          <div class="barline"><span>Clarity</span><span id="clarityText">45</span></div>
+          <div class="bar"><div class="fill" id="clarityFill"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="body">
+      <div id="content"></div>
+      <div class="footer">
+        <span class="pill" id="badge">Loop status: warming up</span>
+        <span class="pill" id="micro">Tip: pick chaos, it still lands</span>
+      </div>
+    </div>
+  </div>
+
+  <script src="./static/game.js"></script>
+</body>
+</html>

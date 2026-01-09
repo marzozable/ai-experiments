@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Chario Airlines</title>
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; background: #0b1220; }
+      canvas { display: block; margin: 0 auto; background: #0b1220; }
+      .hud {
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        color: #e8eefc;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        font-size: 14px;
+        line-height: 1.35;
+        user-select: none;
+        pointer-events: none;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+      }
+      .hint { opacity: 0.85; }
+      .kbd {
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: 6px;
+        border: 1px solid rgba(232,238,252,0.25);
+        background: rgba(255,255,255,0.06);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="hud" id="hud"></div>
+    <canvas id="c"></canvas>
+
+    <script>
+      const canvas = document.getElementById("c");
+      const ctx = canvas.getContext("2d");
+      const hud = document.getElementById("hud");
+
+      function resize() {
+        const w = Math.min(window.innerWidth, 1100);
+        const h = Math.min(window.innerHeight, 700);
+        canvas.width = Math.max(800, w);
+        canvas.height = Math.max(450, h);
+      }
+      window.addEventListener("resize", resize);
+      resize();
+
+      const peFirms = [
+        "Blackstone", "KKR", "Carlyle", "TPG", "Bain Capital", "Vista Equity",
+        "Thoma Bravo", "Warburg Pincus", "General Atlantic", "Silver Lake",
+        "Advent", "Permira", "GTCR", "Hg", "Apollo", "Stone Point", "Cove Hill"
+      ];
+
+      const state = {
+        started: false,
+        gameOver: false,
+        t: 0,
+        score: 0,
+        best: 0,
+        thrust: false,
+        obstacles: [],
+        nextSpawn: 0,
+        firmIndex: 0
+      };
+
+      const world = {
+        gravity: 0.38,
+        thrustPower: 0.75,
+        baseSpeed: 3.2,
+        baseGap: 180,
+        minGap: 90,
+        baseSpawn: 95,
+        minSpawn: 45,
+        landHeight: 70,
+        ceilingHeight: 40
+      };
+
+      const jet = {
+        x: 160,
+        y: canvas.height * 0.5,
+        vy: 0,
+        w: 56,
+        h: 22
+      };
+
+      function reset() {
+        state.started = false;
+        state.gameOver = false;
+        state.t = 0;
+        state.score = 0;
+        state.obstacles = [];
+        state.nextSpawn = 40;
+        state.firmIndex = 0;
+
+        jet.x = 160;
+        jet.y = canvas.height * 0.5;
+        jet.vy = 0;
+      }
+
+      function difficulty() {
+        // score rises about 60 per second
+        const s = state.score;
+
+        // ease in over ~15 seconds (about 900 score ticks)
+        const ease = Math.min(1, s / 900);
+
+        const speedHard = world.baseSpeed + Math.min(6.5, s / 900);
+        const gapHard = Math.max(world.minGap, world.baseGap - s / 18);
+        const spawnHard = Math.max(world.minSpawn, world.baseSpawn - s / 55);
+
+        // easier early values
+        const speedEasy = 2.4;
+        const gapEasy = 230;
+        const spawnEasy = 120;
+
+        const speed = speedEasy + (speedHard - speedEasy) * ease;
+        const gap = gapEasy + (gapHard - gapEasy) * ease;
+        const spawn = spawnEasy + (spawnHard - spawnEasy) * ease;
+
+        return { speed, gap, spawn, ease };
+      }
+
+      function spawnObstacle() {
+        const d = difficulty();
+        const gap = d.gap;
+        const ease = d.ease;
+
+        const W = canvas.width;
+        const H = canvas.height;
+
+        const landY = H - world.landHeight;
+        const ceilingY = world.ceilingHeight;
+
+        // keep early gaps away from extremes
+        const early = 1 - ease;
+        const margin = 55 + 55 * early; // 110 early, 55 later
+
+        const minTop = ceilingY + margin;
+        const maxTop = landY - gap - margin;
+
+        const topH = Math.floor(minTop + Math.random() * Math.max(1, (maxTop - minTop)));
+
+        const firm = peFirms[state.firmIndex % peFirms.length];
+        state.firmIndex += 1;
+
+        state.obstacles.push({
+          x: W + 20,
+          w: 92,
+          topH: topH,
+          gap: gap,
+          firm: firm,
+          passed: false
+        });
+      }
+
+      function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+        return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+      }
+
+      function jetRect() {
+        const { ease } = difficulty();
+        const early = 1 - ease;           // 1 at start, 0 later
+        const shrinkX = 10 + 10 * early;  // 20px early, 10px later
+        const shrinkY = 6 + 6 * early;    // 12px early, 6px later
+
+        return {
+          x: jet.x - jet.w * 0.5 + shrinkX,
+          y: jet.y - jet.h * 0.5 + shrinkY,
+          w: jet.w - shrinkX * 2,
+          h: jet.h - shrinkY * 2
+        };
+      }
+
+      function update() {
+        state.t += 1;
+
+        const d = difficulty();
+        const speed = d.speed;
+        const spawn = d.spawn;
+
+        if (state.started && !state.gameOver) {
+          // physics
+          if (state.thrust) jet.vy -= world.thrustPower;
+          jet.vy += world.gravity;
+          jet.vy *= 0.985;
+          jet.y += jet.vy;
+
+          // spawn
+          state.nextSpawn -= 1;
+          if (state.nextSpawn <= 0) {
+            spawnObstacle();
+            state.nextSpawn = spawn;
+          }
+
+          // move obstacles
+          for (const o of state.obstacles) {
+            o.x -= speed;
+          }
+          // cull
+          state.obstacles = state.obstacles.filter(o => o.x + o.w > -40);
+
+          // score
+          state.score += 1;
+
+          // collisions
+          const r = jetRect();
+          const landY = canvas.height - world.landHeight;
+          const ceilingY = world.ceilingHeight;
+
+          if (r.y < ceilingY || (r.y + r.h) > landY) {
+            state.gameOver = true;
+            state.best = Math.max(state.best, state.score);
+          }
+
+          for (const o of state.obstacles) {
+            const topRect = { x: o.x, y: ceilingY, w: o.w, h: o.topH - ceilingY };
+            const botY = o.topH + o.gap;
+            const botRect = { x: o.x, y: botY, w: o.w, h: landY - botY };
+
+            if (
+              rectsOverlap(r.x, r.y, r.w, r.h, topRect.x, topRect.y, topRect.w, topRect.h) ||
+              rectsOverlap(r.x, r.y, r.w, r.h, botRect.x, botRect.y, botRect.w, botRect.h)
+            ) {
+              state.gameOver = true;
+              state.best = Math.max(state.best, state.score);
+              break;
+            }
+          }
+        }
+      }
+
+      function drawBackground() {
+        const W = canvas.width;
+        const H = canvas.height;
+        const landY = H - world.landHeight;
+        const ceilingY = world.ceilingHeight;
+
+        // sky gradient
+        const g = ctx.createLinearGradient(0, 0, 0, H);
+        g.addColorStop(0, "#0b1220");
+        g.addColorStop(1, "#07101c");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, W, H);
+
+        // ceiling band
+        ctx.fillStyle = "rgba(255,255,255,0.06)";
+        ctx.fillRect(0, 0, W, ceilingY);
+
+        // land
+        ctx.fillStyle = "#12331c";
+        ctx.fillRect(0, landY, W, world.landHeight);
+
+        // ground texture
+        ctx.fillStyle = "rgba(0,0,0,0.20)";
+        for (let x = 0; x < W; x += 22) {
+          ctx.fillRect(x + (state.t % 22), landY + 12, 10, 5);
+        }
+
+        // horizon lines
+        ctx.strokeStyle = "rgba(232,238,252,0.10)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(0, ceilingY);
+        ctx.lineTo(W, ceilingY);
+        ctx.moveTo(0, landY);
+        ctx.lineTo(W, landY);
+        ctx.stroke();
+      }
+
+      function drawObstacle(o) {
+        const H = canvas.height;
+        const landY = H - world.landHeight;
+        const ceilingY = world.ceilingHeight;
+
+        const topY = ceilingY;
+        const topH = o.topH - ceilingY;
+        const botY = o.topH + o.gap;
+        const botH = landY - botY;
+
+        // pillars
+        ctx.fillStyle = "#29324a";
+        ctx.fillRect(o.x, topY, o.w, topH);
+        ctx.fillRect(o.x, botY, o.w, botH);
+
+        // edge highlight
+        ctx.fillStyle = "rgba(255,255,255,0.08)";
+        ctx.fillRect(o.x, topY, 3, topH);
+        ctx.fillRect(o.x, botY, 3, botH);
+
+        // firm label near the gap
+        const label = o.firm;
+        ctx.font = "bold 14px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+        ctx.fillStyle = "rgba(232,238,252,0.92)";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        const lx = o.x + o.w * 0.5;
+        const ly = o.topH + o.gap * 0.5;
+
+        // label plate
+        const padX = 10;
+        const m = ctx.measureText(label);
+        const plateW = Math.min(o.w + 90, m.width + padX * 2);
+        const plateH = 26;
+
+        ctx.fillStyle = "rgba(0,0,0,0.35)";
+        ctx.fillRect(lx - plateW / 2, ly - plateH / 2, plateW, plateH);
+
+        ctx.fillStyle = "rgba(232,238,252,0.92)";
+        ctx.fillText(label, lx, ly);
+      }
+
+      function drawJet() {
+        ctx.save();
+        ctx.translate(jet.x, jet.y);
+
+        const tilt = Math.max(-0.35, Math.min(0.35, jet.vy * 0.03));
+        ctx.rotate(tilt);
+
+        // slightly larger presence
+        const w = jet.w * 1.18;
+        const h = jet.h * 1.22;
+
+        // subtle shadow
+        ctx.fillStyle = "rgba(0,0,0,0.22)";
+        ctx.beginPath();
+        ctx.roundRect(-w * 0.5 + 2, -h * 0.5 + 3, w, h, 11);
+        ctx.fill();
+
+        // fuselage
+        ctx.fillStyle = "#eef3ff";
+        ctx.beginPath();
+        ctx.roundRect(-w * 0.5, -h * 0.5, w, h, 11);
+        ctx.fill();
+
+        // outline
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = "rgba(11,18,32,0.55)";
+        ctx.stroke();
+
+        // nose cone
+        ctx.fillStyle = "#d6ddf0";
+        ctx.beginPath();
+        ctx.moveTo(w * 0.5, 0);
+        ctx.lineTo(w * 0.5 + 18, -9);
+        ctx.lineTo(w * 0.5 + 18, 9);
+        ctx.closePath();
+        ctx.fill();
+
+        // tail fin
+        ctx.fillStyle = "#1b2450";
+        ctx.beginPath();
+        ctx.roundRect(-w * 0.5 + 6, -h * 0.5 - 18, 14, 22, 7);
+        ctx.fill();
+
+        // wing
+        ctx.fillStyle = "#c8d0e8";
+        ctx.beginPath();
+        ctx.moveTo(-6, 2);
+        ctx.lineTo(-26, 14);
+        ctx.lineTo(12, 10);
+        ctx.closePath();
+        ctx.fill();
+
+        // engine pod
+        ctx.fillStyle = "#c8d0e8";
+        ctx.beginPath();
+        ctx.roundRect(-w * 0.08, h * 0.18, 18, 8, 4);
+        ctx.fill();
+
+        // livery stripe
+        ctx.fillStyle = "#1b2450";
+        ctx.beginPath();
+        ctx.roundRect(-w * 0.42, h * 0.10, w * 0.78, h * 0.18, 8);
+        ctx.fill();
+
+        // accent stripe
+        ctx.fillStyle = "rgba(232,238,252,0.55)";
+        ctx.beginPath();
+        ctx.roundRect(-w * 0.40, h * 0.13, w * 0.74, h * 0.06, 6);
+        ctx.fill();
+
+        // windows
+        ctx.fillStyle = "rgba(11,18,32,0.62)";
+        for (let i = 0; i < 4; i++) {
+          ctx.beginPath();
+          ctx.roundRect(-12 + i * 11, -5, 7, 6, 2);
+          ctx.fill();
+        }
+
+        // thrust flame
+        if (state.thrust && state.started && !state.gameOver) {
+          ctx.fillStyle = "rgba(255,255,255,0.30)";
+          ctx.beginPath();
+          ctx.moveTo(-w * 0.5 - 6, 0);
+          ctx.lineTo(-w * 0.5 - 26, -7);
+          ctx.lineTo(-w * 0.5 - 26, 7);
+          ctx.closePath();
+          ctx.fill();
+        }
+
+        // brand text, big and readable with outline
+        const label = "CHARIO AIRLINES";
+        ctx.font = "800 12px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "rgba(0,0,0,0.55)";
+        ctx.strokeText(label, 0, 0);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.fillText(label, 0, 0);
+
+        ctx.restore();
+      }
+
+      function drawOverlay() {
+        const W = canvas.width;
+        const H = canvas.height;
+
+        if (!state.started) {
+          ctx.fillStyle = "rgba(0,0,0,0.35)";
+          ctx.fillRect(0, 0, W, H);
+
+          ctx.fillStyle = "#e8eefc";
+          ctx.font = "700 34px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("Chario Airlines", W / 2, H / 2 - 50);
+
+          ctx.font = "500 16px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+          ctx.fillStyle = "rgba(232,238,252,0.92)";
+          ctx.fillText("Dear Chuck: Press Space to fly. Hold Space to climb. Release to descend.", W / 2, H / 2);
+          ctx.fillText("Avoid private equity firms. Don't let the bastards keep you down!", W / 2, H / 2 + 26);
+
+          ctx.font = "500 14px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+          ctx.fillStyle = "rgba(232,238,252,0.75)";
+          ctx.fillText("Press Space Bar to See a Some Vibe Coding", W / 2, H / 2 + 66);
+        }
+
+        if (state.gameOver) {
+          ctx.fillStyle = "rgba(0,0,0,0.45)";
+          ctx.fillRect(0, 0, W, H);
+
+          ctx.fillStyle = "#e8eefc";
+          ctx.font = "800 36px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("NO Deal Signed", W / 2, H / 2 - 30);
+
+          ctx.font = "600 16px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+          ctx.fillStyle = "rgba(232,238,252,0.92)";
+          ctx.fillText(`Score: ${Math.floor(state.score / 10)}   Best: ${Math.floor(state.best / 10)}`, W / 2, H / 2 + 10);
+
+          ctx.font = "500 14px system-ui, -apple-system, Segoe UI, Roboto, Arial";
+          ctx.fillStyle = "rgba(232,238,252,0.78)";
+          ctx.fillText("Press Enter to Revisit Banging Your Head Against the Wall", W / 2, H / 2 + 44);
+        }
+      }
+
+      function render() {
+        drawBackground();
+
+        for (const o of state.obstacles) drawObstacle(o);
+        drawJet();
+        drawOverlay();
+
+        // HUD
+        const d = difficulty();
+        const scoreDisp = Math.floor(state.score / 10);
+        const bestDisp = Math.floor(state.best / 10);
+        hud.innerHTML = `
+          <div><strong>Chario Airlines</strong></div>
+          <div>Score <span class="kbd">${scoreDisp}</span> Best <span class="kbd">${bestDisp}</span></div>
+          <div class="hint">Speed ${d.speed.toFixed(1)} Gap ${Math.round(d.gap)} Spawn ${Math.round(d.spawn)}</div>
+          <div class="hint">Space to fly. Enter to start or restart.</div>
+        `;
+      }
+
+      function loop() {
+        update();
+        render();
+        requestAnimationFrame(loop);
+      }
+
+      function startGame() {
+        if (!state.started) {
+          state.started = true;
+          state.gameOver = false;
+          state.score = 0;
+          state.t = 0;
+          state.obstacles = [];
+          state.nextSpawn = 85; // easier: delay first obstacle
+          jet.y = canvas.height * 0.5;
+          jet.vy = 0;
+        }
+      }
+
+      function restart() {
+        reset();
+        state.started = true;
+      }
+
+      window.addEventListener("keydown", (e) => {
+        if (e.code === "Space") {
+          e.preventDefault();
+          if (!state.started) startGame();
+          state.thrust = true;
+        }
+        if (e.code === "Enter") {
+          e.preventDefault();
+          if (!state.started) startGame();
+          else if (state.gameOver) restart();
+        }
+      });
+
+      window.addEventListener("keyup", (e) => {
+        if (e.code === "Space") {
+          e.preventDefault();
+          state.thrust = false;
+        }
+      });
+
+      // mouse / touch support
+      window.addEventListener("mousedown", () => { if (!state.started) startGame(); state.thrust = true; });
+      window.addEventListener("mouseup", () => { state.thrust = false; });
+      window.addEventListener("touchstart", (e) => { e.preventDefault(); if (!state.started) startGame(); state.thrust = true; }, { passive: false });
+      window.addEventListener("touchend", (e) => { e.preventDefault(); state.thrust = false; }, { passive: false });
+
+      // start
+      reset();
+      loop();
+    </script>
+  </body>
+</html>
+
